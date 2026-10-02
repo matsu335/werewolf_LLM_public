@@ -1,0 +1,7 @@
+data/
+exports/
+*.log
+.DS_Store
+node_modules/
+Article/
+RequirementsDefinition.md

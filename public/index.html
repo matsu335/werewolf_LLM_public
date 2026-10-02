@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Werewolf LLM Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="mark">W</span><strong>Werewolf LLM Lab</strong><small>人間 × AI 実験プラットフォーム</small></div>
+    <nav><button data-view="setup" class="nav active">部屋作成</button><button data-view="game" class="nav">Game</button><button data-view="game-view" class="nav">Game-view</button><button data-view="history" class="nav">履歴</button><button id="shutdown-system" class="nav danger-text">システム終了</button></nav>
+  </header>
+  <main>
+    <section id="setup-view" class="view"></section>
+    <section id="game-view" class="view hidden"></section>
+    <section id="game-view-view" class="view hidden"></section>
+    <section id="history-view" class="view hidden"></section>
+  </main>
+  <div id="toast" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "werewolf-llm-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Human/LLM cooperative werewolf game and AI experiment platform",
+  "scripts": {
+    "start": "node --experimental-sqlite src/server.js",
+    "dev": "node --experimental-sqlite --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=24" }
+}
