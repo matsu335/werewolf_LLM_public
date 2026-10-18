@@ -143,9 +143,9 @@ const EN = {
   roundHeader: (round) => `Discussion round ${round}:`,
   claim: (c) => `(claim attached: ${CLAIM_EN[c.type] ?? c.type}${c.target ? ` → ${c.target}` : ""}${c.value ? `: ${c.value}` : ""})`,
   coEntry: (e, roles) => (e.coType === "withdraw"
-    ? `${e.playerId} withdrew their CO (was ${roles[e.before] ?? e.before}).`
-    : e.coType === "change" ? `${e.playerId} changed their CO from ${roles[e.before] ?? e.before} to ${roles[e.after] ?? e.after}.`
-      : `${e.playerId} CO'd ${roles[e.claimedRole] ?? e.claimedRole}.`),
+    ? `${e.playerId} withdrew their CO (was ${roles[e.before] ?? e.before})${e.withSpeech ? " (together with their speech)" : ""}.`
+    : e.coType === "change" ? `${e.playerId} changed their CO from ${roles[e.before] ?? e.before} to ${roles[e.after] ?? e.after}${e.withSpeech ? " (together with their speech)" : ""}.`
+      : `${e.playerId} CO'd ${roles[e.claimedRole] ?? e.claimedRole}${e.withSpeech ? " (together with their speech)" : ""}.`),
   coNone: (id) => `${id} made no CO.`,
   order: (order) => `Speaking order: ${order}`,
   votes: (id, n) => `${id} ${n} vote${n === 1 ? "" : "s"}`, noVotes: "no votes",
@@ -212,9 +212,9 @@ const JA = {
   roundHeader: (round) => `議論 ${round}巡目:`,
   claim: (c) => `（添えられた主張: ${CLAIM_JA[c.type] ?? c.type}${c.target ? ` → ${c.target}` : ""}${c.value ? `: ${c.value}` : ""}）`,
   coEntry: (e, roles) => (e.coType === "withdraw"
-    ? `${e.playerId} がCOを撤回しました（撤回前: ${roles[e.before] ?? e.before}）。`
-    : e.coType === "change" ? `${e.playerId} がCOを${roles[e.before] ?? e.before}から${roles[e.after] ?? e.after}に変更しました。`
-      : `${e.playerId} が${roles[e.claimedRole] ?? e.claimedRole}としてCOしました。`),
+    ? `${e.playerId} がCOを撤回しました（撤回前: ${roles[e.before] ?? e.before}）${e.withSpeech ? "（発言と同時）" : ""}。`
+    : e.coType === "change" ? `${e.playerId} がCOを${roles[e.before] ?? e.before}から${roles[e.after] ?? e.after}に変更しました${e.withSpeech ? "（発言と同時）" : ""}。`
+      : `${e.playerId} が${roles[e.claimedRole] ?? e.claimedRole}としてCOしました${e.withSpeech ? "（発言と同時）" : ""}。`),
   coNone: (id) => `${id} はCOしませんでした。`,
   order: (order) => `発言順: ${order}`,
   votes: (id, n) => `${id} ${n}票`, noVotes: "得票なし",

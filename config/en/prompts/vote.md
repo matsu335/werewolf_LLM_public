@@ -8,7 +8,7 @@ Check what happens in this phase:
 - Only IDs listed under "Players you can choose" in the input are valid, and you yourself can be a candidate. Writing your own ID nominates yourself for execution.
 - Who voted for whom is not made public. Only the number of votes each player received is made public.
 
-Put an ID such as P1 in execute_target, not a name. Write reason in English, within 30 words. If it is too long, the output is cut off and becomes invalid. Do not return any other keys or explanations.
+Put an ID such as P1 in execute_target, not a name. Write reason in English, within 30 words. Text far beyond the limit is cut off and becomes invalid. Do not return any other keys or explanations.
 
 Return exactly one JSON object.
 {"execute_target":"<ID of the chosen player>","reason":"<reason in English, within 30 words>"}

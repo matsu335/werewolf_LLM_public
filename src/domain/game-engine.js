@@ -143,7 +143,8 @@ export class GameEngine {
     return { speech: safeSpeech, claims: normalizedClaims };
   }
 
-  applyCo(playerId, action = { type: "none" }) {
+  /** withSpeech: 議論中に発言と同時に行ったCO。公開記録でCOフェーズのCOと区別して示す。 */
+  applyCo(playerId, action = { type: "none" }, { withSpeech = false } = {}) {
     const player = this.requireAlive(playerId);
     const requested = action?.type || "none";
     if (!CO_TYPES.includes(requested)) throw new GameRuleError("CO操作が不正です");
@@ -155,7 +156,7 @@ export class GameEngine {
     if (type === "withdraw") player.currentCo = null;
     // 適用されなかった役職名は記録にも公開イベントにも残さない（真の役職が漏れる経路になる）。
     const claimedRole = ["declare", "change"].includes(type) ? action.role : null;
-    const record = { playerId, day: this.state.day, phase: this.state.phase, type, claimedRole, before, after: player.currentCo };
+    const record = { playerId, day: this.state.day, phase: this.state.phase, type, claimedRole, before, after: player.currentCo, ...(withSpeech ? { withSpeech: true } : {}) };
     if (type !== "none") {
       player.claimHistory.push({ ...record, kind: "co" });
       this.emit("co", record, "public");
@@ -341,7 +342,7 @@ export class GameEngine {
           speech: payload.speech || "", claims: (payload.claims || []).map(({ type, target, value }) => ({ type, target, value })),
         });
       } else if (event.type === "co") {
-        record.push({ type: "co", day: event.day, playerId: payload.playerId, coType: payload.type, claimedRole: payload.claimedRole ?? null, before: payload.before ?? null, after: payload.after ?? null });
+        record.push({ type: "co", day: event.day, playerId: payload.playerId, coType: payload.type, claimedRole: payload.claimedRole ?? null, before: payload.before ?? null, after: payload.after ?? null, withSpeech: Boolean(payload.withSpeech) });
       } else if (event.type === "co_no_action") {
         record.push({ type: "co_none", day: event.day, playerId: payload.playerId });
       } else if (event.type === "vote_result") {

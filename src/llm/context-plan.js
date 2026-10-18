@@ -4,11 +4,11 @@ import { CALL_TYPES } from "./prompt-store.js";
 import { estimateTokens } from "./runner.js";
 
 // 1発言が入力に占める最大量の見積り。本文はスキーマの機械的上限、Claimは平均1件、行の装飾ぶんを足す。
-const SPEECH_TOKENS = { ja: 273 + 70 + 20, en: 250 + 45 + 20 };
+const SPEECH_TOKENS = { ja: 455 + 70 + 20, en: 400 + 45 + 20 };
 // 1日あたりのCO・投票結果・朝の発表などの行と、固定の見出し・プレイヤー表・秘密情報。
 const PER_DAY_TOKENS = 250;
 const FIXED_TOKENS = 1200;
-const LARGEST_ANSWER_TOKENS = 800;
+const LARGEST_ANSWER_TOKENS = 1200;
 
 /**
  * 試合を始める前に、最悪の場合の入力がコンテキスト長に収まるかを確かめる。
@@ -24,7 +24,7 @@ export function planContext(config, promptStore) {
   const systemTokens = Math.max(...CALL_TYPES.flatMap((callType) => ROLE_IDS.map((role) => estimateTokens(promptStore.bundle(callType, role, language).system))));
   const inputTokens = systemTokens + FIXED_TOKENS + days * PER_DAY_TOKENS + speeches * (SPEECH_TOKENS[language] ?? SPEECH_TOKENS.ja);
   const rows = (config.players || []).filter((p) => p.controller === CONTROLLERS.AI && p.llm).map((p) => {
-    const contextTokens = p.llm.contextTokens ?? p.llm.numCtx ?? 16384;
+    const contextTokens = p.llm.contextTokens ?? p.llm.numCtx ?? 20480;
     const required = inputTokens + LARGEST_ANSWER_TOKENS + (p.llm.reasoningTokens ?? 4096) + 256;
     return { playerId: p.id, contextTokens, required, fits: required <= contextTokens };
   });

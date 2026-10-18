@@ -6,11 +6,11 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 呼び出し種別ごとのJSON本体の予算。全部を同じmax_tokensで回すと長い理由文で末尾が切れてJSONが壊れる。 */
 const ANSWER_TOKENS = {
-  co: 320, discussion: 800, vote: 320, attack: 320, divination: 320, guard: 320,
+  co: 320, discussion: 1200, vote: 320, attack: 320, divination: 320, guard: 320,
   wolf_meeting: 400, strategy_memory: 500,
 };
 
-const DEFAULT_CONTEXT_TOKENS = 16384;
+const DEFAULT_CONTEXT_TOKENS = 20480;
 // 推論モデルの思考はJSON本体より先に出るため、ここを確保しないと本体が出る前に打ち切られる。
 // qwen3:8bの思考は実測で最大12,700文字（英語で約3,200トークン）に達するため、実測値を基準に取る。
 const DEFAULT_REASONING_TOKENS = 4096;
@@ -97,7 +97,7 @@ export class LlmRunner {
         const diagnostics = analyze({ response, messages, budget, outputTokens, reasoningTokens });
         repairHint = buildRepairHint(language, response?.content ?? null, error.message, diagnostics);
         // 枠切れは入力ではなく予算の問題。思考枠を広げて同じ問いをもう一度出す。
-        const ceiling = reasoningHeadroom(contextTokens, estimateMessages(messages), answerTokens);
+        const ceiling = reasoningHeadroom(contextTokens, estimateMessages(messages), answerTokens, config.reasoningTokens);
         if (diagnostics.outputTruncated && reasoningTokens < ceiling) {
           reasoningTokens = Math.min(ceiling, reasoningTokens * 2);
           outputTokens = answerTokens + reasoningTokens;
@@ -133,9 +133,13 @@ export class LlmRunner {
   }
 }
 
-/** 実際に送る入力を差し引いた、思考に回せるトークン数の上限。 */
-function reasoningHeadroom(contextTokens, inputTokens, answerTokens) {
-  return Math.max(0, Math.min(MAX_REASONING_TOKENS, contextTokens - inputTokens - answerTokens - SAFETY_MARGIN_TOKENS));
+/**
+ * 実際に送る入力を差し引いた、思考に回せるトークン数の上限。
+ * 思考枠を広く設定した場合（推論の強さを上げたOpenAIのモデルなど）は、その2倍までは広げられるようにする。
+ */
+function reasoningHeadroom(contextTokens, inputTokens, answerTokens, configuredReasoningTokens = null) {
+  const cap = Math.max(MAX_REASONING_TOKENS, (configuredReasoningTokens ?? 0) * 2);
+  return Math.max(0, Math.min(cap, contextTokens - inputTokens - answerTokens - SAFETY_MARGIN_TOKENS));
 }
 
 /** 日本語混在テキストのざっくりしたトークン見積り。予算判定と切り捨て検知に使う。 */
@@ -172,6 +176,8 @@ function analyze({ response, messages, budget, outputTokens = null, reasoningTok
     outputTokenBudget: outputTokens,
     reasoningTokenBudget: reasoningTokens,
     reasoningChars: String(response?.reasoning ?? "").length,
+    // OpenAIは思考の本文を返さず、トークン数だけを報告する。
+    reportedReasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? null,
     emptyContent: !String(response?.content ?? "").trim(),
   };
 }
@@ -206,6 +212,8 @@ function makeLog({ spec, config, bundle, language, request, startedAt, latencyMs
     trueRole: spec.player.role, controllerType: spec.player.controller, day: spec.day,
     phase: spec.phase, round: spec.round ?? null, callType: spec.callType, language,
     model: config.model, baseUrl: redactUrl(config.baseUrl),
+    // 考える量の設定。モデルの能力と区別して分析できるよう、呼び出しごとに残す（未指定はモデルの既定値）。
+    reasoningEffort: config.reasoningEffort ?? null,
     promptFiles: bundle.files,
     // input は描き起こし前の構造化データ（分析用）。LLMが実際に読んだものは request.body.messages にある。
     input: spec.input,
@@ -227,8 +235,8 @@ function redactUrl(value) {
  * プロンプトの値ちょうどにすると、上限を目指して書いた文が最後の一文の途中で切られ、研究データとして読めなくなる。
  */
 const LIMITS = {
-  ja: { thought: 300, speech: 300, claimValue: 60, reason: 140, message: 200, memory: 400 },
-  en: { thought: 400, speech: 1000, claimValue: 100, reason: 300, message: 400, memory: 800 },
+  ja: { thought: 300, speech: 500, claimValue: 60, reason: 140, message: 200, memory: 400 },
+  en: { thought: 400, speech: 1600, claimValue: 100, reason: 300, message: 400, memory: 800 },
 };
 
 function schemaForCall(callType, language = "ja") {
@@ -249,6 +257,8 @@ function schemaForCall(callType, language = "ja") {
       strict: true,
       schema: closed({
         private_thought: thought,
+        // COしてから話す順に並べる。発言の中で名乗れるのは、この co 欄を適用した後のCOだけ。
+        co: closed({ type: { type: "string", enum: ["none", "declare", "withdraw", "change"] }, claimed_role: nullableRole }),
         speech: { type: "string", maxLength: limit.speech },
         claims: {
           type: "array", maxItems: 4,

@@ -7,7 +7,7 @@ Check what happens in this phase:
 - A divination neither kills nor protects anyone. You cannot choose an execution or an attack here.
 - Only IDs listed under "Players you can choose" in the input are valid. You cannot divine yourself.
 
-Put an ID such as P1 in divine_target, not a name. Write reason in English, within 30 words. If it is too long, the output is cut off and becomes invalid. Do not return any other keys or explanations.
+Put an ID such as P1 in divine_target, not a name. Write reason in English, within 30 words. Text far beyond the limit is cut off and becomes invalid. Do not return any other keys or explanations.
 
 Return exactly one JSON object.
 {"divine_target":"<ID of the chosen player>","reason":"<reason in English, within 30 words>"}

@@ -1,5 +1,8 @@
 import { CONTROLLERS, DEFAULT_LANGUAGE, DEFAULT_ROLE_COUNTS, LANGUAGES, MAX_PLAYERS, ROLE_IDS } from "./constants.js";
 
+// OpenAIの推論モデルに送る reasoning_effort。未指定ならモデルの既定値になる。
+const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 export function defaultLlmConfig() {
   return {
     baseUrl: "http://localhost:11434/v1",
@@ -16,7 +19,7 @@ export function defaultLlmConfig() {
     // qwen3:8bの思考は実測で最大12,700文字（英語で約3,200トークン）。足りないと劣化したリトライ出力が本番に残る。
     reasoningTokens: 4096,
     // 推論サーバのコンテキスト長。Ollamaには num_ctx としてそのまま送る。入力がこれを超える場合は送らずに試合を止める。
-    contextTokens: 16384,
+    contextTokens: 20480,
     timeoutMs: 180000,
     retries: 2,
     extra: {},
@@ -60,6 +63,7 @@ export function validateConfig(config) {
     if (player.fixedRole && !ROLE_IDS.includes(player.fixedRole)) errors.push(`${player.id}: fixedRoleが不正です`);
     if (player.controller === CONTROLLERS.AI && !player.llm) errors.push(`${player.id}: AI設定がありません`);
     if (player.llm?.api && !["auto", "ollama", "openai"].includes(player.llm.api)) errors.push(`${player.id}: APIの種別が不正です`);
+    if (player.llm?.reasoningEffort && !REASONING_EFFORTS.includes(player.llm.reasoningEffort)) errors.push(`${player.id}: reasoningEffort は ${REASONING_EFFORTS.join(" / ")} のいずれかです`);
   }
   let totalRoles = 0;
   for (const role of ROLE_IDS) {

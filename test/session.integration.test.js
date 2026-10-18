@@ -101,6 +101,43 @@ test("a well-formed answer for every call type is accepted without a single fall
   repository.close();
 });
 
+/** 最初の発言と同時に市民COし、本文でも市民を名乗るクライアント。 */
+class VillagerCoClient extends CompliantClient {
+  chat(config, messages, options) {
+    if (options.responseSchema.name !== "discussion_response") return super.chat(config, messages, options);
+    this.calls.push({ callType: "discussion", messages });
+    const already = /\(you\) \| alive \| current CO: villager/.test(messages[1].content);
+    const body = {
+      private_thought: "state my role",
+      co: already ? { type: "none", claimed_role: null } : { type: "declare", claimed_role: "villager" },
+      speech: "As a villager, I would like to hear from everyone.", claims: [],
+    };
+    return Promise.resolve({ content: JSON.stringify(body), rawEnvelope: {}, usage: null, finishReason: "stop", latencyMs: 1 });
+  }
+}
+
+test("a CO made together with a speech is recorded just before that speech", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "werewolf-speech-co-"));
+  const repository = new Repository(path.join(dir, "test.sqlite"));
+  const config = defaultConfig();
+  config.seed = 557;
+  for (const player of config.players) player.llm.retries = 0;
+  const engine = new GameEngine(config);
+  const client = new VillagerCoClient();
+  const runner = new LlmRunner({ client, promptStore: new PromptStore(), onLog: (log) => repository.saveLlmCall(log) });
+  await new GameSession({ engine, repository, llmRunner: runner }).start();
+  const exported = repository.fullExport(engine.gameId);
+  assert.deepEqual(exported.llmCalls.filter((call) => call.callType === "discussion" && !call.success).map((call) => call.error), []);
+  const events = exported.events.map((event) => ({ ...event.payload, event: event.type }));
+  const firstSpeech = events.findIndex((event) => event.event === "speech");
+  assert.deepEqual(events[firstSpeech - 1], { ...events[firstSpeech - 1], event: "co", type: "declare", playerId: events[firstSpeech].playerId, claimedRole: ROLES.VILLAGER, withSpeech: true });
+  // 2回目以降は co が none なので、発言ごとにCOが積み上がらない。
+  const speakers = new Set(events.filter((event) => event.event === "speech").map((event) => event.playerId));
+  assert.equal(events.filter((event) => event.event === "co" && event.withSpeech).length, speakers.size);
+  assert.ok(client.calls.some((call) => /CO'd villager \(together with their speech\)/.test(call.messages[1].content)));
+  repository.close();
+});
+
 test("metrics report JSON health and confirm the leak paths are closed", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "werewolf-metrics-"));
   const repository = new Repository(path.join(dir, "test.sqlite"));

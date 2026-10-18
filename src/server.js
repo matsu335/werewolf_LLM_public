@@ -10,6 +10,7 @@ import { SessionManager } from "./app/session-manager.js";
 import { LANGUAGES, ROLE_IDS } from "./domain/constants.js";
 import { PromptStore } from "./llm/prompt-store.js";
 import { contextPlanErrors, planContext } from "./llm/context-plan.js";
+import { credentialErrors } from "./llm/openai-client.js";
 import { renderInput } from "./llm/input-renderer.js";
 import { translateWithServerProvider, serverTranslationProvider } from "./translation.js";
 
@@ -29,7 +30,7 @@ const server = http.createServer(async (request, response) => {
       const config = await readJson(request);
       const errors = validateConfig(config);
       if (errors.length) return sendJson(response, 400, { errors });
-      return sendJson(response, 200, { plan: planContext(config, promptStore), errors: contextPlanErrors(config, promptStore) });
+      return sendJson(response, 200, { plan: planContext(config, promptStore), errors: [...credentialErrors(config), ...contextPlanErrors(config, promptStore)] });
     }
     if (request.method === "GET" && url.pathname === "/api/games") return sendJson(response, 200, repository.listGames());
     if (request.method === "GET" && url.pathname === "/api/configs") return sendJson(response, 200, repository.listConfigs());
@@ -49,7 +50,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/games") {
       const config = await readJson(request);
       const errors = validateConfig(config);
-      if (!errors.length) errors.push(...contextPlanErrors(config, promptStore));
+      if (!errors.length) errors.push(...credentialErrors(config), ...contextPlanErrors(config, promptStore));
       if (errors.length) return sendJson(response, 400, { errors });
       const session = sessions.create(config);
       return sendJson(response, 201, { gameId: session.engine.gameId });

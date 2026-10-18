@@ -1,6 +1,6 @@
 import { CLAIM_TYPE_IDS, CLAIM_TYPES, CO_TYPES, CONTROLLERS, PHASES, ROLE_IDS, ROLES } from "../domain/constants.js";
 import { gameLanguage } from "../domain/config.js";
-import { mentionsPartnership, normalizeRoleId, redactUnbackedRoleClaims, splitSentences, unbackedRoleClaims, violatesLanguage } from "../domain/text-rules.js";
+import { mentionsPartnership, normalizeRoleId, splitSentences, violatesLanguage } from "../domain/text-rules.js";
 import { GameRuleError } from "../domain/game-engine.js";
 import { ContextOverflowError } from "../llm/runner.js";
 import { text } from "../llm/messages.js";
@@ -105,8 +105,8 @@ export class GameSession {
     this.engine.setPhase(PHASES.DISCUSSION, { round, currentActor: id });
     const player = this.playerDescriptor(id);
     if (player.controller === CONTROLLERS.HUMAN) {
-      this.waitForHuman("speech", [id], { round, index, prompt: "公開発言とClaimを入力してください（役職の主張はCO操作で行います）" }, async (received) => {
-        this.engine.recordSpeech(id, received[id]);
+      this.waitForHuman("speech", [id], { round, index, prompt: "公開発言とClaimを入力してください（発言と同時にCOもできます）" }, async (received) => {
+        this.recordSpeech(id, received[id]);
         await this.runDiscussionRound(round, index + 1);
       });
       return;
@@ -116,7 +116,7 @@ export class GameSession {
     const validate = (value) => validateDiscussion(value, context);
     const fallback = (_error, attempts) => salvageSpeech(attempts?.lastParsed, context);
     const [{ value }] = await this.runSpecs([this.spec(id, "discussion", input, validate, fallback)]);
-    this.engine.recordSpeech(id, { speech: value.speech, claims: value.claims });
+    this.recordSpeech(id, value);
     this.persist();
     await this.runDiscussionRound(round, index + 1);
   }
@@ -137,13 +137,19 @@ export class GameSession {
       finalize: async (received) => {
         for (const id of order) {
           this.engine.setPhase(PHASES.DISCUSSION, { round, currentActor: id });
-          this.engine.recordSpeech(id, received[id]);
+          this.recordSpeech(id, received[id]);
         }
         this.persist();
         if (this.engine.state.day === 1 && round === 1) return this.runSimultaneousRound(2, order.filter((id) => this.engine.player(id).alive));
         return this.runVotePhase();
       },
     });
+  }
+
+  /** 発言と同時に行ったCOは、その発言の直前に記録する。発言の中の名乗りがCOに裏付けられた状態で公開されるようにするため。 */
+  recordSpeech(id, value) {
+    if (value.co && value.co.type !== "none") this.engine.applyCo(id, value.co, { withSpeech: true });
+    this.engine.recordSpeech(id, { speech: value.speech, claims: value.claims });
   }
 
   /** 公開発言の検査に必要な自分の秘密情報。ルール上の「秘密情報を漏らさない」を機械的に強制する。 */
@@ -523,14 +529,21 @@ function validateDiscussion(value, context = null) {
   if (!raw.trim()) throw new Error(t.speechEmpty);
   // 内容ではなく言語だけを直させる。書き直しを求めると論拠が落ちた一行に縮むため、翻訳として扱う。
   if (violatesLanguage(raw, language)) throw new Error(t.speechLanguage);
-  const unbacked = context ? unbackedRoleClaims(raw, language, context.currentCo ?? null) : [];
-  if (unbacked.length) throw new Error(t.unbackedClaim(unbacked.join(", "), context.currentCo ?? null));
+  // COは発言と同時に co 欄で行い、記録するのはこの欄だけ。本文の名乗りは検査も推測もしない。
+  // 本文から推測していたころ、"P3's claim that I am a werewolf is false" を人狼COと誤認し、本物の占い師のCOを書き換えた。
+  // COと食い違う名乗りや嘘の名乗りも、他のプレイヤーが判断する材料として発言のまま残す。
+  const co = validateCo(value.co ?? { type: "none" }, context?.currentCo ?? null, context?.messageLanguage ?? language);
   const leaks = detectPartnerLeaks(raw, context);
   if (leaks.length) throw new Error(t.speechLeak(t.partnerReveal));
   const claims = normalizeClaims(value.claims, context);
   const untethered = findUntetheredClaims(raw, claims);
   if (untethered.length) throw new Error(t.untethered(untethered.join(" / ")));
-  return { speech: raw.trim(), claims };
+  return { speech: raw.trim(), claims, co };
+}
+
+/** co 欄の最終処理。読めないCO操作は「何もしない」として扱い、推測で役職を補わない。 */
+function salvageCo(value, currentCo, language) {
+  try { return validateCo(value ?? { type: "none" }, currentCo, language); } catch { return { type: "none", role: null }; }
 }
 
 /**
@@ -547,16 +560,16 @@ function findUntetheredClaims(speech, claims) {
     .map((claim) => `${claim.type} → ${claim.target}`);
 }
 
-/** 検査を通らなかった発言の最終処理。COの裏付けがない名乗りと仲間の暴露だけを削って残りを活かす。 */
+/** 検査を通らなかった発言の最終処理。仲間の暴露だけを文単位で削って残りを活かす。 */
 function salvageSpeech(value, context = null) {
   const language = context?.language ?? "ja";
-  const raw = String(value?.speech ?? value?.message ?? "");
-  const { text: kept } = redactUnbackedRoleClaims(stripPartnerMentions(raw, context), language, context?.currentCo ?? null);
+  const co = salvageCo(value?.co, context?.currentCo ?? null, language);
+  const kept = stripPartnerMentions(String(value?.speech ?? value?.message ?? ""), context);
   const speech = kept.trim() || text(language).fallbackSpeech;
   const claims = normalizeClaims(value?.claims, context);
   // ここで残すと、差し戻しても最後はclaimの裏口から情報が配られることになる。
   const untethered = new Set(findUntetheredClaims(speech, claims));
-  return { speech, claims: claims.filter((claim) => !untethered.has(`${claim.type} → ${claim.target}`)) };
+  return { speech, claims: claims.filter((claim) => !untethered.has(`${claim.type} → ${claim.target}`)), co };
 }
 
 function detectPartnerLeaks(speech, context) {

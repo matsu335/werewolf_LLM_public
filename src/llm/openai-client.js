@@ -28,19 +28,60 @@ export function buildChatRequest(config, messages, { responseSchema = null, maxT
       },
     };
   }
+  // OpenAI公式は max_tokens を廃止して max_completion_tokens に移行しており、推論モデル（o系・GPT-5以降）は
+  // max_tokens と既定値以外の temperature を400で拒否する。互換サーバ（vLLM等）は従来どおり送る。
+  const official = isOpenAiHost(baseUrl);
+  const reasoningModel = official && isOpenAiReasoningModel(config.model);
   return {
     api, url: `${baseUrl}/chat/completions`,
     body: {
       model: config.model,
       messages,
-      temperature: config.temperature ?? 0.7,
-      max_tokens: predict,
-      response_format: responseSchema ? { type: "json_schema", json_schema: responseSchema } : { type: "json_object" },
+      ...(reasoningModel ? {} : { temperature: config.temperature ?? 0.7 }),
+      ...(official ? { max_completion_tokens: predict } : { max_tokens: predict }),
+      ...(reasoningModel && config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+      response_format: responseSchema
+        ? { type: "json_schema", json_schema: official ? { ...responseSchema, schema: stripUnsupportedKeywords(responseSchema.schema) } : responseSchema }
+        : { type: "json_object" },
       stream: false,
-      ...(config.seed == null ? {} : { seed: config.seed }),
+      ...(config.seed == null || reasoningModel ? {} : { seed: config.seed }),
       ...(config.extra || {}),
     },
   };
+}
+
+export function isOpenAiHost(baseUrl) {
+  try { return new URL(String(baseUrl || "")).hostname === "api.openai.com"; } catch { return false; }
+}
+
+export function isOpenAiReasoningModel(model) {
+  return /^(?:o\d|gpt-(?:[5-9]|\d{2,}))/iu.test(String(model || ""));
+}
+
+/**
+ * OpenAIの厳格な構造化出力が受け付けないキーワードを落とす。文字列の長さ（maxLength）は対象外なので、
+ * 長さはプロンプトの上限と受け取り側の切り詰めで守る。
+ */
+function stripUnsupportedKeywords(schema) {
+  if (Array.isArray(schema)) return schema.map(stripUnsupportedKeywords);
+  if (!schema || typeof schema !== "object") return schema;
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== "maxLength").map(([key, value]) => [key, stripUnsupportedKeywords(value)]));
+}
+
+/**
+ * OpenAIのAPIキーは設定に持たせず、サーバの環境変数 OPENAI_API_KEY からだけ読む。
+ * 設定は試合データ（SQLite）とエクスポートJSONにそのまま残るため、そこへキーを書かせない。
+ */
+export function resolveApiKey(config) {
+  if (isOpenAiHost(config.baseUrl)) return process.env.OPENAI_API_KEY || null;
+  return config.apiKey || null;
+}
+
+/** 試合を始める前に、キーが無いOpenAIプレイヤーを断る。途中で失敗するとFallbackの無作為な行動が混ざる。 */
+export function credentialErrors(config) {
+  return (config.players || [])
+    .filter((p) => p.controller === "ai" && p.llm && isOpenAiHost(p.llm.baseUrl) && !process.env.OPENAI_API_KEY)
+    .map((p) => `${p.id}: OpenAIのAPIを使う設定ですが、環境変数 OPENAI_API_KEY が設定されていません。サーバを起動する前に設定してください`);
 }
 
 export function resolveApi(config) {
@@ -53,12 +94,14 @@ export class OpenAICompatibleClient {
     if (!config.baseUrl) throw new Error("baseUrl is required");
     if (!config.model) throw new Error("model is required");
     const request = buildChatRequest(config, messages, { responseSchema, maxTokens });
+    const apiKey = resolveApiKey(config);
+    if (!apiKey && isOpenAiHost(config.baseUrl)) throw new Error("OPENAI_API_KEY is not set");
     const timeout = AbortSignal.timeout(config.timeoutMs ?? 180000);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const started = performance.now();
     const response = await fetch(request.url, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}) },
+      headers: { "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
       body: JSON.stringify(request.body), signal: combined,
     });
     const rawText = await response.text();

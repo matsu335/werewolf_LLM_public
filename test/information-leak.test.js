@@ -4,7 +4,7 @@ import { GameEngine } from "../src/domain/game-engine.js";
 import { defaultConfig } from "../src/domain/config.js";
 import { CONTROLLERS, ROLES, VISIBILITIES } from "../src/domain/constants.js";
 import { TARGET_KEYS, salvageSpeech, validateCo, validateDiscussion, validateMeeting, validateTarget } from "../src/app/game-session.js";
-import { findSelfRoleClaims, normalizeRoleId, violatesLanguage } from "../src/domain/text-rules.js";
+import { normalizeRoleId, violatesLanguage } from "../src/domain/text-rules.js";
 
 function configWithRoles(roles, seed = 123) {
   const roleCounts = Object.fromEntries(Object.values(ROLES).map((role) => [role, 0]));
@@ -75,59 +75,27 @@ test("every public speech from day one onward stays in full, in the order it hap
   assert.deepEqual(speeches.map((row) => [row.day, row.speech]), [[1, "1日目の発言"], [4, "4日目の発言"]]);
 });
 
-test("naming a role in speech is allowed only when it is the role you have CO'd", () => {
-  // 禁じたいのは「COをせず、発言の中だけで役職を主張する」こと。
-  assert.throws(() => validateDiscussion({ speech: "私は占い師です。P2は白でした。" }, ja({ role: ROLES.SEER })), /COしていない役職/);
-  assert.equal(validateDiscussion({ speech: "私は占い師です。P2は白でした。" }, ja({ role: ROLES.SEER, currentCo: ROLES.SEER })).speech, "私は占い師です。P2は白でした。");
-  // COと違う役職を名乗るのは、発言だけで別の主張をしていることになる。
-  assert.throws(() => validateDiscussion({ speech: "私は狩人です。" }, ja({ currentCo: ROLES.SEER })), /COしていない役職/);
-  const salvaged = salvageSpeech({ speech: "私は狂人です。ところでP2の沈黙が気になります。" }, ja({ role: ROLES.MADMAN }));
-  assert.equal(salvaged.speech, "ところでP2の沈黙が気になります。");
-  assert.ok(findSelfRoleClaims("俺が人狼だ").includes(ROLES.WEREWOLF));
-  assert.ok(findSelfRoleClaims("私の役職は狩人です").includes(ROLES.BODYGUARD));
-  assert.ok(findSelfRoleClaims("私は市民として発言します").includes(ROLES.VILLAGER));
+test("a CO is recorded only from the co field of the speech, never guessed from the speech text", () => {
+  const declared = validateDiscussion({ co: { type: "declare", claimed_role: "seer" }, speech: "I am the seer. P2 is not a werewolf." }, en({ role: ROLES.SEER }));
+  assert.deepEqual(declared.co, { type: "declare", role: ROLES.SEER });
+  // 本文の名乗りは検査も推測もしない。引用・否定・嘘の名乗りも、そのまま発言として残る。
+  const quoted = validateDiscussion({ co: { type: "none", claimed_role: null }, speech: "As the seer, I divined P1. P3's claim that I am a werewolf is false." }, en({ role: ROLES.SEER, currentCo: ROLES.SEER }));
+  assert.deepEqual(quoted.co, { type: "none", role: null });
+  assert.equal(quoted.speech, "As the seer, I divined P1. P3's claim that I am a werewolf is false.");
+  assert.equal(validateDiscussion({ speech: "私は狩人です。" }, ja({ currentCo: ROLES.SEER })).co.type, "none");
+  // 発言と同時のCO変更もCOフェーズと同じ規則で扱う。
+  assert.deepEqual(validateDiscussion({ co: { type: "change", claimed_role: "bodyguard" }, speech: "私は狩人です。" }, ja({ currentCo: ROLES.SEER })).co, { type: "change", role: ROLES.BODYGUARD });
+  assert.throws(() => validateDiscussion({ co: { type: "declare", claimed_role: "mayor" }, speech: "I am the mayor." }, en()));
+  // 最終手段では、読めないCOは「何もしない」にし、発言は残す。
+  const salvaged = salvageSpeech({ co: { type: "declare", claimed_role: "mayor" }, speech: "I am the madman. Anyway, P2 has been quiet." }, en({ role: ROLES.MADMAN }));
+  assert.deepEqual(salvaged.co, { type: "none", role: null });
+  assert.equal(salvaged.speech, "I am the madman. Anyway, P2 has been quiet.");
 });
 
-test("denying a role is not a role claim", () => {
-  assert.deepEqual(findSelfRoleClaims("私は人狼ではない"), []);
-  assert.deepEqual(findSelfRoleClaims("私は人狼じゃないです"), []);
-  assert.deepEqual(findSelfRoleClaims("I'm not a werewolf.", "en"), []);
-  assert.deepEqual(findSelfRoleClaims("I am definitely not the wolf.", "en"), []);
-  assert.deepEqual(findSelfRoleClaims("I wasn't the seer.", "en"), []);
-  assert.equal(validateDiscussion({ speech: "I'm not a werewolf. P2 is quiet." }, en()).speech, "I'm not a werewolf. P2 is quiet.");
-});
-
-test("naming somebody else's role or ordinary wording is not treated as a leak", () => {
-  // 他人を疑う発言と、役職語を含むだけの言い回しは通す。
-  assert.deepEqual(findSelfRoleClaims("P3が人狼だと思う"), []);
-  assert.deepEqual(findSelfRoleClaims("私はP3が人狼だと思います"), []);
-  assert.deepEqual(findSelfRoleClaims("私は村人の安全を守りたいです"), []);
-  assert.deepEqual(findSelfRoleClaims("人狼を見つけるために情報を共有しましょう"), []);
-  assert.deepEqual(findSelfRoleClaims("占い師の結果を待ちたいです"), []);
+test("a fellow werewolf's identity is still kept out of public speech", () => {
   const context = ja({ role: ROLES.WEREWOLF, partners: ["P5"], validTargets: ["P1", "P5"] });
   assert.equal(validateDiscussion({ speech: "私はP1が人狼だと思います。" }, context).speech, "私はP1が人狼だと思います。");
   assert.throws(() => validateDiscussion({ speech: "P5は私の仲間なので信用できます。" }, context), /秘密情報/);
-});
-
-test("English self-claims are detected with the same boundaries as Japanese", () => {
-  assert.deepEqual(findSelfRoleClaims("I am the seer.", "en"), [ROLES.SEER]);
-  assert.deepEqual(findSelfRoleClaims("I'm a werewolf, honestly.", "en"), [ROLES.WEREWOLF]);
-  assert.deepEqual(findSelfRoleClaims("My role is bodyguard.", "en"), [ROLES.BODYGUARD]);
-  assert.deepEqual(findSelfRoleClaims("As the seer, I checked P2.", "en"), [ROLES.SEER]);
-  // 実機で出た形。冠詞なしでも名乗りである。
-  assert.deepEqual(findSelfRoleClaims("As bodyguard, I protect a player.", "en"), [ROLES.BODYGUARD]);
-  assert.deepEqual(findSelfRoleClaims("I am just a villager.", "en"), [ROLES.VILLAGER]);
-  assert.deepEqual(findSelfRoleClaims("I claim fortune teller.", "en"), [ROLES.SEER]);
-  // 主語と役職語の間に別の述語が挟まる文は、他人についての推理であって名乗りではない。
-  assert.deepEqual(findSelfRoleClaims("I think P3 is the werewolf.", "en"), []);
-  assert.deepEqual(findSelfRoleClaims("I'm sure the seer is P1.", "en"), []);
-  assert.deepEqual(findSelfRoleClaims("I am worried about the werewolf.", "en"), []);
-  assert.deepEqual(findSelfRoleClaims("We must find the werewolf before the seer dies.", "en"), []);
-  assert.deepEqual(findSelfRoleClaims("I'm guarding my words.", "en"), []);
-  assert.throws(() => validateDiscussion({ speech: "I am the seer. P2 is not a werewolf." }, en({ role: ROLES.SEER })), /have not CO'd/);
-  assert.equal(validateDiscussion({ speech: "I am the seer. P2 is not a werewolf." }, en({ role: ROLES.SEER, currentCo: ROLES.SEER })).claims.length, 0);
-  const salvaged = salvageSpeech({ speech: "I am the madman. Anyway, P2 has been quiet." }, en({ role: ROLES.MADMAN }));
-  assert.equal(salvaged.speech, "Anyway, P2 has been quiet.");
   const wolf = en({ role: ROLES.WEREWOLF, partners: ["P5"], validTargets: ["P1", "P5"] });
   assert.throws(() => validateDiscussion({ speech: "P5 is my partner, trust them." }, wolf), /secret information/);
   assert.equal(validateDiscussion({ speech: "I trust P5 more than P1." }, wolf).speech, "I trust P5 more than P1.");

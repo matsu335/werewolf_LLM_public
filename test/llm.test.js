@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ContextOverflowError, LlmRunner, estimateTokens } from "../src/llm/runner.js";
 import { PromptStore } from "../src/llm/prompt-store.js";
-import { buildChatRequest, parseJsonResponse, repairJson } from "../src/llm/openai-client.js";
+import { buildChatRequest, credentialErrors, parseJsonResponse, repairJson, resolveApiKey } from "../src/llm/openai-client.js";
 import { renderInput } from "../src/llm/input-renderer.js";
 import { planContext } from "../src/llm/context-plan.js";
 import { defaultConfig } from "../src/domain/config.js";
@@ -252,6 +252,8 @@ test("the pre-game plan checks the worst case against the context before anythin
   const config = defaultConfig();
   const plan = planContext(config, new PromptStore());
   assert.ok(plan.players.every((row) => row.fits), JSON.stringify(plan));
+  // 日本語は同じ発言でもトークンが多い。既定の5人村は日本語でも収まっていなければならない。
+  assert.ok(planContext({ ...config, language: "ja" }, new PromptStore()).players.every((row) => row.fits));
   config.players.forEach((p) => { p.llm.contextTokens = 4096; });
   assert.ok(planContext(config, new PromptStore()).players.every((row) => !row.fits));
 });
@@ -270,4 +272,47 @@ test("JSON cut off by the output token limit is repaired instead of discarded", 
 test("token estimation separates ascii from japanese so the budget check is not wildly off", () => {
   assert.ok(estimateTokens("あ".repeat(100)) > 80);
   assert.ok(estimateTokens("a".repeat(100)) < 30);
+});
+
+test("OpenAI reasoning models get max_completion_tokens and no temperature, and the key comes only from the environment", () => {
+  const openai = { baseUrl: "https://api.openai.com/v1", model: "gpt-6-luna", apiKey: "ollama", temperature: 0.7, seed: 1, reasoningEffort: "low" };
+  const schema = { name: "vote_response", strict: true, schema: { type: "object", properties: { reason: { type: "string", maxLength: 300 } }, required: ["reason"], additionalProperties: false } };
+  const { body } = buildChatRequest(openai, [], { responseSchema: schema, maxTokens: 1000 });
+  // GPT-6は max_tokens と既定以外の temperature を400で拒否する。
+  assert.equal(body.max_completion_tokens, 1000);
+  assert.equal("max_tokens" in body, false);
+  assert.equal("temperature" in body, false);
+  assert.equal("seed" in body, false);
+  assert.equal(body.reasoning_effort, "low");
+  assert.equal(JSON.stringify(body.response_format).includes("maxLength"), false);
+  // 互換サーバには従来どおり送る。
+  const compatible = buildChatRequest({ ...openai, baseUrl: "http://127.0.0.1:8000/v1", model: "some-model" }, [], { responseSchema: schema, maxTokens: 1000 }).body;
+  assert.equal(compatible.max_tokens, 1000);
+  assert.equal(compatible.temperature, 0.7);
+  assert.ok(JSON.stringify(compatible.response_format).includes("maxLength"));
+  // 設定の apiKey（Ollama用の "ollama"）はOpenAIには送らない。キーは環境変数からだけ読む。
+  const saved = process.env.OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+    assert.equal(resolveApiKey(openai), null);
+    const config = { players: [{ id: "P1", controller: "ai", llm: openai }, { id: "P2", controller: "ai", llm: { baseUrl: "http://localhost:11434/v1", model: "qwen3:8b" } }] };
+    assert.equal(credentialErrors(config).length, 1);
+    process.env.OPENAI_API_KEY = "test-key";
+    assert.equal(resolveApiKey(openai), "test-key");
+    assert.deepEqual(credentialErrors(config), []);
+  } finally {
+    if (saved === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = saved;
+  }
+});
+
+test("the rules let a player reveal their own role and results, and forbid only exposing fellow werewolves", () => {
+  // 「夜の情報を公開発言に書くな」と命じていたころ、占い師が自分の結果からの推論を撤回した。
+  for (const language of ["en", "ja"]) {
+    const system = new PromptStore().bundle("discussion", ROLES.SEER, language).system;
+    assert.equal(/Do not write (?:your )?secret information|秘密情報(?:をそのまま|を公開発言へ)書いてはいけません/.test(system), false, language);
+    assert.ok(/fellow werewolves|仲間の人狼/.test(system), language);
+  }
+  // 「検証されない」はルールブックで一度述べれば足りる。繰り返すと全員が同じ但し書きを唱えるだけになった。
+  const system = new PromptStore().bundle("co", ROLES.SEER, "en").system;
+  assert.ok((system.match(/self-reported|never checks|not checked|unverified|guaranteed/giu) || []).length <= 2, system);
 });

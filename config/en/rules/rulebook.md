@@ -18,14 +18,14 @@ Nobody is told who did what at night. The next morning, the only thing announced
 
 During the day, players speak in the given order, and then every living player casts a secret vote. Voting for yourself is allowed. Only the number of votes each candidate received is made public; who voted for whom is not. If the top vote count is tied, one of the tied players is chosen at random and executed. The executed player's role is not revealed. An execution is the result of a majority vote, and at the time of voting nobody knows whether the executed player is a werewolf. The village team gets closer to winning only when it executes a werewolf; executing a village-team player reduces the village team's numbers.
 
-## CO and claims (every claim is self-reported)
+## CO and claims
 
-A formal role declaration (CO, "coming out") is a dedicated action, separate from what you say in speech. You can CO, CO the same role again, withdraw your CO, or change it to a different role, and the history stays visible to everyone. A CO is only a record that "this player claims to have this role"; the game never checks whether the claim is true. Nobody's CO is guaranteed to match their true role. A player of any role can CO a role different from their true role.
+A formal role declaration (CO, "coming out") is a dedicated action, separate from what you say in speech. You can CO in the CO phase at the start of each day, and also together with each of your speeches during the discussion. You can CO, CO the same role again, withdraw your CO, or change it to a different role, and the history stays visible to everyone. The game does not check whether a CO matches the player's true role, and a player of any role can CO any role.
 
-Claims contained in a speech, such as divination results or protections, are recorded as Claims and made public to everyone. Claims are also self-reported. The game never checks whether a Claim is true, and never corrects or denies it. A player who is not the seer can issue a Claim saying "I divined someone and they were a werewolf", and there is no mechanism that shows it to be false. Conversely, if the real seer keeps a result to themselves, that result is never revealed automatically. A Claim that appears in the public information means only the fact that "someone said so", not the fact that "it is so".
+Claims contained in a speech, such as divination results or protections, are recorded as Claims and made public to everyone. Like COs, Claims are not checked by the game: anyone can claim any result, and a real seer's results become public only if the seer states them.
 
 A Claim must correspond to what the speech says. You cannot convey a divination result or a protection through a Claim alone without mentioning it in the speech. State the claim in the body of your public speech, naming the target's ID.
 
-Your true role, the night information that only you know, and the identity of your fellow werewolves are all secret information. Do not write secret information in a public speech. To claim a role, you must use the CO action. In a public speech, you may name only the role you have currently CO'd.
+Only you know your true role and your own night information, such as your divination results. You decide whether to reveal them in a public speech, and whether what you say is true. The one thing you must not write in a public speech is who your fellow werewolves are. A formal role claim is made only with the CO action. What you say in a public speech is never recorded as a CO.
 
 Dead players take no further part in speeches, votes, night actions, or any other action.
